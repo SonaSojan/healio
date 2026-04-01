@@ -1,6 +1,10 @@
 let S = { role: null, id: null, email: null, ageGroup: null, selDoc: null, activeCase: null, loggedDoc: null };
 let _previewId = 'HLO-' + Math.floor(1000 + Math.random() * 9000);
 
+// --- NEW VARIABLES FOR NOTIFICATIONS ---
+let currentMsgCount = 0; 
+let pollInterval = null;
+
 // Navigation
 function gotoPage(id) {
     const landingPages = ['home-page', 'user-signup', 'user-login', 'doctor-login', 'yoga-page', 'counselling-page', 'payment-page'];
@@ -39,6 +43,10 @@ async function launchApp() {
             });
         }
 
+        // --- TRACK MESSAGES AND START POLLING ---
+        currentMsgCount = u.msgs ? u.msgs.length : 0;
+        startMessagePolling();
+
         checkEmergencyAlert(u);
         renderPatientChat(u);
         toast('🛡️ Welcome back! ID: ' + S.id);
@@ -58,6 +66,39 @@ async function launchApp() {
         renderDocChat();
         toast('🩺 Welcome to the portal, ' + S.loggedDoc.name);
     }
+}
+
+// --- NEW POLLING FUNCTION ---
+function startMessagePolling() {
+    if (pollInterval) clearInterval(pollInterval);
+    
+    // Check the server every 3 seconds for new messages
+    pollInterval = setInterval(async () => {
+        if (S.role !== 'user' || !S.id) return;
+        
+        try {
+            const res = await fetch(`/api/patient/${S.id}`);
+            if (res.ok) {
+                const u = await res.json();
+                
+                // If there are more messages now than we had before
+                if (u.msgs && u.msgs.length > currentMsgCount) {
+                    const lastMsg = u.msgs[u.msgs.length - 1];
+                    
+                    // If the last message was from the doctor, trigger notification!
+                    if (lastMsg.sender === 'doctor') {
+                        toast('💬 New reply from ' + (u.doc || 'your Doctor') + '!');
+                    }
+                    
+                    currentMsgCount = u.msgs.length;
+                    renderPatientChat(u); // Auto-update the chat box
+                    checkEmergencyAlert(u); // Auto-update emergency alerts
+                }
+            }
+        } catch (e) {
+            console.log("Polling error:", e);
+        }
+    }, 3000);
 }
 
 // Auth & Payment
@@ -128,6 +169,9 @@ function doPayment() {
 }
 
 function logout() {
+    // Stop polling when logged out
+    if (pollInterval) clearInterval(pollInterval);
+    
     S = { role: null, id: null, email: null, ageGroup: null, selDoc: null, activeCase: null, loggedDoc: null };
     document.querySelectorAll('.fi-inp').forEach(i => i.value = '');
     gotoPage('home-page');
@@ -156,10 +200,12 @@ async function sendPatientReport() {
     });
 
     if (res.ok) {
+        const u = await res.json();
+        currentMsgCount = u.msgs.length; // Update count so it doesn't trigger our own notification
         document.getElementById('pat-symptoms').value = '';
         document.getElementById('pat-context').value = '';
         toast('Report sent securely');
-        renderPatientChat(await res.json());
+        renderPatientChat(u);
     }
 }
 
@@ -176,8 +222,10 @@ async function sendPatientMessage() {
     });
 
     if (res.ok) {
+        const u = await res.json();
+        currentMsgCount = u.msgs.length; // Update count
         inp.value = '';
-        renderPatientChat(await res.json());
+        renderPatientChat(u);
     }
 }
 
