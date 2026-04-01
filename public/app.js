@@ -1,8 +1,9 @@
 let S = { role: null, id: null, email: null, ageGroup: null, selDoc: null, activeCase: null, loggedDoc: null };
 let _previewId = 'HLO-' + Math.floor(1000 + Math.random() * 9000);
 
-// --- NEW VARIABLES FOR NOTIFICATIONS ---
+// --- NOTIFICATION TRACKERS ---
 let currentMsgCount = 0; 
+let currentEmergencyStatus = false;
 let pollInterval = null;
 
 // Navigation
@@ -19,7 +20,7 @@ function scrollTo2(id) {
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-// Launching App & Fetching Fresh Data
+// Launching App
 async function launchApp() {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.getElementById('app').style.display = 'flex'; 
@@ -43,8 +44,9 @@ async function launchApp() {
             });
         }
 
-        // --- TRACK MESSAGES AND START POLLING ---
+        // Initialize trackers and start polling
         currentMsgCount = u.msgs ? u.msgs.length : 0;
+        currentEmergencyStatus = u.isEmergency || false;
         startMessagePolling();
 
         checkEmergencyAlert(u);
@@ -68,11 +70,11 @@ async function launchApp() {
     }
 }
 
-// --- NEW POLLING FUNCTION ---
+// --- BACKGROUND NOTIFICATION CHECKER ---
 function startMessagePolling() {
     if (pollInterval) clearInterval(pollInterval);
     
-    // Check the server every 3 seconds for new messages
+    // Check the server every 3 seconds for updates
     pollInterval = setInterval(async () => {
         if (S.role !== 'user' || !S.id) return;
         
@@ -81,24 +83,27 @@ function startMessagePolling() {
             if (res.ok) {
                 const u = await res.json();
                 
-                // If there are more messages now than we had before
+                // 1. Check for new Chat Messages
                 if (u.msgs && u.msgs.length > currentMsgCount) {
                     const lastMsg = u.msgs[u.msgs.length - 1];
-                    
-                    // If the last message was from the doctor, trigger notification!
                     if (lastMsg.sender === 'doctor') {
                         toast('💬 New reply from ' + (u.doc || 'your Doctor') + '!');
                     }
-                    
                     currentMsgCount = u.msgs.length;
-                    renderPatientChat(u); // Auto-update the chat box
-                    checkEmergencyAlert(u); // Auto-update emergency alerts
+                    renderPatientChat(u); 
+                }
+
+                // 2. Check for Emergency Alert status changes
+                if (u.isEmergency !== currentEmergencyStatus) {
+                    currentEmergencyStatus = u.isEmergency;
+                    checkEmergencyAlert(u);
+                    if (u.isEmergency) toast('🚨 Emergency Alert Triggered by Doctor!');
                 }
             }
         } catch (e) {
             console.log("Polling error:", e);
         }
-    }, 3000);
+    }, 3000); // 3000 milliseconds = 3 seconds
 }
 
 // Auth & Payment
@@ -169,9 +174,7 @@ function doPayment() {
 }
 
 function logout() {
-    // Stop polling when logged out
-    if (pollInterval) clearInterval(pollInterval);
-    
+    if (pollInterval) clearInterval(pollInterval); // Stop tracking when logged out
     S = { role: null, id: null, email: null, ageGroup: null, selDoc: null, activeCase: null, loggedDoc: null };
     document.querySelectorAll('.fi-inp').forEach(i => i.value = '');
     gotoPage('home-page');
@@ -201,7 +204,7 @@ async function sendPatientReport() {
 
     if (res.ok) {
         const u = await res.json();
-        currentMsgCount = u.msgs.length; // Update count so it doesn't trigger our own notification
+        currentMsgCount = u.msgs.length; 
         document.getElementById('pat-symptoms').value = '';
         document.getElementById('pat-context').value = '';
         toast('Report sent securely');
@@ -223,7 +226,7 @@ async function sendPatientMessage() {
 
     if (res.ok) {
         const u = await res.json();
-        currentMsgCount = u.msgs.length; // Update count
+        currentMsgCount = u.msgs.length;
         inp.value = '';
         renderPatientChat(u);
     }
@@ -257,7 +260,7 @@ function checkEmergencyAlert(u) {
                 <div class="etit">Emergency Alert Triggered</div>
                 <div class="etxt">Your doctor flagged your case as critical. Seek immediate medical assistance.</div>
             </div>
-            <button class="eclose" onclick="this.parentElement.remove()">✖</button>
+            <button class="eclose" onclick="this.parentElement.innerHTML=''">✖</button>
         </div>` : '';
 }
 
